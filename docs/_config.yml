@@ -1,0 +1,5 @@
+title: Reponomi
+description: Jump to any GitHub repository, or a page inside it, from the keyboard.
+remote_theme: just-the-docs/just-the-docs@v0.10.1
+plugins:
+  - jekyll-remote-theme

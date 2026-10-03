@@ -1,10 +1,13 @@
 # Reponomi
 
+A macOS menu bar app that jumps to a GitHub repository — or a specific page
+inside it, or its clone on your disk — in a few keystrokes. Press a global
+shortcut, type a few letters, hit Return.
+
 <img src="docs/assets/inline-location.png" alt="The Reponomi search panel: typing 'sw pr' targets the pull requests of the best match" width="680">
 
-A macOS menu bar app that jumps to a GitHub repository — or a specific page
-inside it — in your browser. Press a global shortcut, type a few letters,
-hit Return.
+*Typing `sw pr` picks the best match for "sw" and goes straight to its pull
+requests.*
 
 The name is a Devil Fruit that One Piece never had: the *Repo Repo no Mi*,
 whose user can appear at any repository instantly. Say it "re-po-no-mi".

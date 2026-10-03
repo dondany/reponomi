@@ -1,5 +1,7 @@
 # Reponomi
 
+<img src="docs/assets/inline-location.png" alt="The Reponomi search panel: typing 'sw pr' targets the pull requests of the best match" width="680">
+
 A macOS menu bar app that jumps to a GitHub repository — or a specific page
 inside it — in your browser. Press a global shortcut, type a few letters,
 hit Return.

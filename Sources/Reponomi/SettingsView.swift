@@ -13,6 +13,7 @@ struct SettingsView: View {
     @State private var refreshMinutes = 60
     @State private var localApp: String?
     @State private var localCommand = ""
+    @State private var ciHosts = ""
     /// Why the form could not be saved, if it couldn't.
     @State private var problem: String?
     @State private var showsIgnored = false
@@ -63,6 +64,15 @@ struct SettingsView: View {
                         .footnote()
                 }
 
+                Section {
+                    TextField("Build hosts", text: $ciHosts, prompt: Text("ci.example.com, app.circleci.com"))
+                } header: {
+                    Text("CI builds")
+                } footer: {
+                    Text("`ci` in the search panel opens the CI build of the latest commit. Builds on GitHub open directly, and so do builds on these hosts. For any other host you’re asked first, and hosts you allow are added here.")
+                        .footnote()
+                }
+
                 Section("Shortcut") {
                     LabeledContent("Open Reponomi") {
                         HotkeyRecorder(current: state.config.hotkey) { hotkey in
@@ -101,6 +111,8 @@ struct SettingsView: View {
         }
         .frame(width: 540, height: 680)
         .onAppear(perform: load)
+        // A host allowed from the search panel shows up while this is open.
+        .onChange(of: state.config.ciHosts) { _, hosts in ciHosts = hosts.joined(separator: ", ") }
         .sheet(isPresented: $showsIgnored) {
             IgnoredRepositoriesView(state: state)
         }
@@ -120,6 +132,7 @@ struct SettingsView: View {
         refreshMinutes = config.refreshMinutes
         localApp = config.localApp
         localCommand = config.localCommand ?? ""
+        ciHosts = config.ciHosts.joined(separator: ", ")
     }
 
     private func remove(_ id: AccountDraft.ID) {
@@ -135,6 +148,11 @@ struct SettingsView: View {
         }
         if let repeated = hosts.first(where: { host in hosts.filter { $0 == host }.count > 1 }) {
             problem = "Two accounts use \(repeated). Each account needs its own host."
+            return
+        }
+        let buildHosts = Config.parseHosts(ciHosts)
+        if let invalid = buildHosts.first(where: { !Config.isValidHost($0) }) {
+            problem = "“\(invalid)” isn’t a valid build host. Enter just the host, such as ci.example.com."
             return
         }
         problem = nil
@@ -157,6 +175,8 @@ struct SettingsView: View {
         config.localApp = localApp
         let command = localCommand.trimmingCharacters(in: .whitespacesAndNewlines)
         config.localCommand = command.isEmpty ? nil : command
+        config.ciHosts = buildHosts
+        ciHosts = buildHosts.joined(separator: ", ")
         state.update(config)
         for index in accounts.indices {
             accounts[index].settle(as: saved[index])

@@ -62,7 +62,7 @@ struct SearchView: View {
                                 RepoRow(
                                     match: match,
                                     showsHost: state.config.spansHosts,
-                                    isCloned: workspace.cloned.contains(match.repo.key),
+                                    isCloned: workspace.isCloned(match.repo),
                                     isIgnored: model.showsIgnored && state.config.ignored.contains(match.repo.key),
                                     badge: index == model.selection ? badge : nil
                                 )
@@ -119,7 +119,7 @@ struct SearchView: View {
             if !status.isWarning {
                 KeyHint(key: "↩", label: "Open")
                 if let repo = model.selectedRepo, state.config.account(for: repo)?.workingDirectoryURL != nil {
-                    KeyHint(key: "⇧↩", label: workspace.cloned.contains(repo.key) ? "Open folder" : "Clone")
+                    KeyHint(key: "⇧↩", label: workspace.isCloned(repo) ? "Open folder" : "Clone")
                 }
                 if model.lockedRepo == nil {
                     KeyHint(key: "⇥", label: "Locations")
@@ -127,6 +127,9 @@ struct SearchView: View {
                     KeyHint(key: "esc", label: "Back")
                 }
                 KeyHint(key: "⌘↩", label: "Copy URL")
+                if checkedOutBranch != nil, let repo = model.target?.repo {
+                    KeyHint(key: "⌥↩", label: repo.defaultBranch.map(GitHubClient.displayable) ?? "Default branch")
+                }
             }
         }
         .font(.system(size: 11))
@@ -135,11 +138,21 @@ struct SearchView: View {
         .frame(minHeight: 30)
     }
 
+    /// The branch a location such as CI build will look at for the selected
+    /// repository: the one checked out in its clone, when that isn't the
+    /// default branch (⌥↩ picks the default one instead).
+    private var checkedOutBranch: String? {
+        guard let target = model.target, target.location.needsHeadCommit,
+              let ref = workspace.checkedOutRef(of: target.repo), ref != target.repo.defaultBranch
+        else { return nil }
+        return GitHubClient.isCommitHash(ref) ? String(ref.prefix(7)) : GitHubClient.displayable(ref)
+    }
+
     /// Where Return will go, shown on the selected repository.
     private var badge: String? {
         switch model.inlineLocation {
         case .none: return nil
-        case .found(let location): return "→ \(location.name)"
+        case .found(let location): return "→ \(location.name)" + (checkedOutBranch.map { " · \($0)" } ?? "")
         case .unknown(let text): return "No location “\(text)”"
         }
     }

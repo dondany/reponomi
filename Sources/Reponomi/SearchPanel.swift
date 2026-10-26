@@ -121,7 +121,9 @@ final class SearchPanelController: NSObject, NSWindowDelegate {
         case 126: // up arrow
             model.move(by: -1)
         case 36, 76: // return, keypad enter
-            activate(flags == .command ? .copyURL : flags == .shift ? .local : .browser)
+            // ⌥ picks the default branch over the one checked out.
+            let rest = flags.subtracting(.option)
+            activate(rest == .command ? .copyURL : rest == .shift ? .local : .browser, defaultBranch: flags.contains(.option))
         case 48: // tab
             if flags == .shift { model.unlock() } else { model.lockSelection() }
         case 51 where flags == .command: // delete
@@ -144,7 +146,7 @@ final class SearchPanelController: NSObject, NSWindowDelegate {
         return true
     }
 
-    private func activate(_ action: Action) {
+    private func activate(_ action: Action, defaultBranch: Bool = false) {
         guard let target = model.target else {
             NSSound.beep()
             return
@@ -154,18 +156,24 @@ final class SearchPanelController: NSObject, NSWindowDelegate {
             return
         }
         if target.location.needsHeadCommit {
-            // The page depends on the latest commit, so ask GitHub for it
-            // first. The panel goes away now; the page opens when it's known.
+            // The page depends on a commit, so ask GitHub for it first. The
+            // panel goes away now; the page opens when it's known.
             let (repo, location) = target
             let account = state.config.account(for: repo)
             let ciHosts = state.config.ciHosts
+            let ref = defaultBranch ? nil : workspace.checkedOutRef(of: repo)
             state.recordUse(of: repo)
             hide()
             Task {
                 let client = await AppState.client(for: repo, account: account)
-                let url = await location.resolve(for: repo, using: client, ciHosts: ciHosts)
-                guard let url else { return NSSound.beep() }
-                deliver(url, action)
+                switch await location.resolve(for: repo, ref: ref, using: client, ciHosts: ciHosts) {
+                case .open(let url):
+                    deliver(url, action)
+                case .confirm(let host, let check, let build, let otherwise):
+                    deliver(confirm(host: host, check: check, build: build, repo: repo, action: action) ?? otherwise, action)
+                case nil:
+                    NSSound.beep()
+                }
             }
             return
         }
@@ -176,6 +184,22 @@ final class SearchPanelController: NSObject, NSWindowDelegate {
         state.recordUse(of: target.repo)
         deliver(url, action)
         hide()
+    }
+
+    /// Asks whether build links on `host` may be opened. Returns `build` when
+    /// they may (and remembers that), nil for the checks page instead.
+    private func confirm(host: String, check: String, build: URL, repo: Repo, action: Action) -> URL? {
+        let alert = NSAlert()
+        alert.messageText = "Open links to \(host)?"
+        let name = check.isEmpty ? "A check" : "The check “\(check)”"
+        alert.informativeText = "\(name) on \(repo.fullName) links to its build on \(host). Reponomi only opens build links on hosts you allow. You can change this in Settings.\n\n\(build.absoluteString)"
+        alert.addButton(withTitle: action == .copyURL ? "Allow and Copy" : "Allow and Open")
+        alert.addButton(withTitle: "Use Checks Page").keyEquivalent = "\u{1b}"
+        // The panel doesn't activate the app, so the alert has to.
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        state.allowCIHost(host)
+        return build
     }
 
     private func deliver(_ url: URL, _ action: Action) {

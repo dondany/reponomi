@@ -64,4 +64,33 @@ public enum Git {
             throw GitError(message: lines.isEmpty ? "git exited with status \(process.terminationStatus)." : lines.suffix(2).joined(separator: " "))
         }
     }
+
+    /// The branch checked out in the clone at `directory`, or its commit when
+    /// HEAD is detached. Read from `.git/HEAD` rather than by running git,
+    /// which a clone's own config could make run other programs.
+    public static func checkedOutRef(in directory: URL) -> String? {
+        let head = directory.appendingPathComponent(".git/HEAD")
+        guard let values = try? head.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+              values.isRegularFile == true, (values.fileSize ?? .max) <= 4_096,
+              let text = try? String(contentsOf: head, encoding: .utf8)
+        else { return nil }
+        let line = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prefix = "ref: refs/heads/"
+        if line.hasPrefix(prefix) {
+            let branch = String(line.dropFirst(prefix.count))
+            return isSafeRef(branch) ? branch : nil
+        }
+        return GitHubClient.isCommitHash(line) ? line : nil
+    }
+
+    /// A branch name that is safe to put in a URL path: what git itself
+    /// allows, minus anything that could step out of the path (`..`, empty
+    /// segments) or end it (`?`, `#`), and minus spaces and control characters.
+    public static func isSafeRef(_ ref: String) -> Bool {
+        let forbidden = CharacterSet(charactersIn: " ~^:?*[\\#%").union(.controlCharacters).union(.whitespacesAndNewlines)
+        return !ref.isEmpty && ref.utf8.count <= 255
+            && ref.unicodeScalars.allSatisfy { !forbidden.contains($0) }
+            && !ref.contains("@{") && !ref.hasSuffix(".lock")
+            && ref.split(separator: "/", omittingEmptySubsequences: false).allSatisfy { !$0.isEmpty && !$0.hasPrefix(".") }
+    }
 }

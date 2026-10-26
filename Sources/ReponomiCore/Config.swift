@@ -158,6 +158,18 @@ public struct Config: Codable, Equatable {
             .filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }
     }
 
+    /// Hostnames typed as a list, e.g. `ci.example.com, https://app.circleci.com/`,
+    /// normalized and without repeats. Entries that aren't hostnames are kept
+    /// so they can be pointed out; check them with `isValidHost`.
+    public static func parseHosts(_ text: String) -> [String] {
+        var seen = Set<String>()
+        return text
+            .components(separatedBy: CharacterSet(charactersIn: ", \n\t"))
+            .filter { !$0.isEmpty }
+            .map(normalizeHost)
+            .filter { seen.insert($0).inserted }
+    }
+
     /// Whether `host` is a bare hostname. The token is sent to it and URLs
     /// are built from it, so `user@host`, ports, paths and the like — which
     /// can make a URL go somewhere other than it appears to — are refused.

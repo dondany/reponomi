@@ -43,6 +43,7 @@ to 50 results are shown.
 | `↩` | Open in the browser |
 | `⇧↩` | Open the [local clone](local-clones.md), cloning it first if needed |
 | `⌘↩` | Copy the URL instead of opening it |
+| `⌥↩` | With [CI build and Checks](locations.md#which-branch): use the default branch instead of the checked-out one |
 | `⇥` | Choose a [location](locations.md) inside the selected repository |
 | `esc` | Step back from the location list; otherwise close the panel |
 | `⇧⇥`, or `⌫` in an empty field | Step back from the location list |

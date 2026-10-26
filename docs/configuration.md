@@ -7,8 +7,8 @@ nav_order: 8
 # Configuration
 
 Almost everything is set in the Settings window (`⌘,` in the panel, or
-**Settings…** in the menu bar icon's menu). Custom locations and CI hosts
-are the only things that need the config file.
+**Settings…** in the menu bar icon's menu). Custom locations are the one
+thing that needs the config file.
 
 ## The Settings window
 
@@ -120,7 +120,7 @@ is optional.
 ```
 
 `path` is appended to the repository's URL, with `{branch}` replaced by its
-default branch and `{sha}` by the latest commit on that branch. See [Locations](locations.md#adding-your-own).
+default branch and `{sha}` by the latest commit on the checked-out branch. See [Locations](locations.md#adding-your-own).
 
 ### CI hosts
 
@@ -128,9 +128,10 @@ default branch and `{sha}` by the latest commit on that branch. See [Locations](
 "ciHosts": ["ci.example.com", "app.circleci.com"]
 ```
 
-Hostnames of the CI services whose build links the `ci` location may open,
-besides the repository's own GitHub host. A link on any other host opens the
-checks page instead. See [Locations](locations.md#ci-build).
+Hostnames of the CI services whose build links the `ci` location opens
+without asking, besides the repository's own GitHub host. Edit them in
+**Settings › CI builds**; a host you allow when asked is added here. See
+[Locations](locations.md#which-links-it-follows).
 
 ## Other files
 

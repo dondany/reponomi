@@ -4,7 +4,8 @@ import Foundation
 public struct Location: Codable, Hashable {
     public var name: String
     /// Appended to the repository URL. `{branch}` expands to the default
-    /// branch, `{sha}` to the latest commit on it.
+    /// branch, `{sha}` to the latest commit on the checked-out branch (see
+    /// `resolve`).
     public var path: String
     /// Short mnemonics that select this location, e.g. `p` or `pr`.
     public var keys: [String]
@@ -56,24 +57,33 @@ public struct Location: Codable, Hashable {
         return url
     }
 
-    /// The page to open. A location with `{sha}` asks `lookup` for the latest
-    /// commit first, and goes to its fallback if that fails. The CI location
-    /// then goes to the build of the check worth looking at, if its link is
-    /// on the repository's host or one of `ciHosts`, and to `path` otherwise.
-    public func resolve(for repo: Repo, using lookup: CommitLookup, ciHosts: [String] = []) async -> URL? {
-        guard needsHeadCommit else { return url(for: repo) }
-        guard let sha = try? await lookup.headCommit(owner: repo.owner, name: repo.name),
-              let page = url(for: repo, headCommit: sha)
-        else {
-            return fallbackPath.flatMap { Location(name: name, path: $0).url(for: repo) }
+    /// Where to go. A location with `{sha}` asks `lookup` for the latest
+    /// commit on `ref` (a branch, usually the one checked out), else on the
+    /// default branch, else goes to its fallback. The CI location then goes
+    /// to the build of the check worth looking at: straight there on the
+    /// repository's host or one of `ciHosts`, after asking on any other host,
+    /// and to `path` (the checks page) when there is no such build.
+    public func resolve(for repo: Repo, ref: String? = nil, using lookup: CommitLookup, ciHosts: [String] = []) async -> Destination? {
+        guard needsHeadCommit else { return url(for: repo).map(Destination.open) }
+        var sha: String?
+        if let ref {
+            sha = try? await lookup.commit(owner: repo.owner, name: repo.name, ref: ref)
         }
-        if opensBuild,
-           let checks = try? await lookup.checks(owner: repo.owner, name: repo.name, commit: sha),
-           let link = CICheck.preferred(checks)?.link,
-           let build = CICheck.openableURL(link, for: repo, ciHosts: ciHosts) {
-            return build
+        if sha == nil {
+            sha = try? await lookup.commit(owner: repo.owner, name: repo.name, ref: "HEAD")
         }
-        return page
+        guard let sha, let page = url(for: repo, headCommit: sha) else {
+            return fallbackPath.flatMap { Location(name: name, path: $0).url(for: repo) }.map(Destination.open)
+        }
+        guard opensBuild,
+              let checks = try? await lookup.checks(owner: repo.owner, name: repo.name, commit: sha),
+              let check = CICheck.preferred(checks), let link = check.link,
+              let build = CICheck.buildURL(link), let host = build.host?.lowercased()
+        else { return .open(page) }
+        if let trusted = CICheck.openableURL(link, for: repo, ciHosts: ciHosts) {
+            return .open(trusted)
+        }
+        return .confirm(host: host, check: check.name, build: build, otherwise: page)
     }
 }
 

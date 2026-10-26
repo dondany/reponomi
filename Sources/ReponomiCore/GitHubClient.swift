@@ -94,12 +94,15 @@ public struct GitHubClient: CommitLookup {
         return try await fetchAll("\(apiBase)/user/repos?per_page=100&affiliation=owner,collaborator,organization_member")
     }
 
-    /// The latest commit on the repository's default branch, as a hash.
-    public func headCommit(owner: String, name: String) async throws -> String {
-        // Both become part of the request's path.
-        guard Repo.isSafeName(owner), Repo.isSafeName(name) else { throw GitHubError.notFound }
+    /// The latest commit on branch `ref`, as a hash. `HEAD` is the default
+    /// branch; a commit hash is checked to exist.
+    public func commit(owner: String, name: String, ref: String = "HEAD") async throws -> String {
+        // All three become part of the request's path.
+        guard Repo.isSafeName(owner), Repo.isSafeName(name), Git.isSafeRef(ref) else { throw GitHubError.notFound }
         try checkHostAndToken()
-        guard let url = URL(string: "\(apiBase)/repos/\(owner)/\(name)/commits/HEAD") else { throw GitHubError.badResponse }
+        guard let path = ref.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let url = URL(string: "\(apiBase)/repos/\(owner)/\(name)/commits/\(path)")
+        else { throw GitHubError.badResponse }
         // This media type answers with the bare hash instead of the whole commit.
         let (data, _) = try await get(url, accept: "application/vnd.github.sha", maxBytes: 1_000)
         let sha = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -307,7 +310,7 @@ public struct GitHubClient: CommitLookup {
     /// Free text from the server, cut to a sensible length and stripped of
     /// control characters and of the direction overrides that can make text
     /// read as something other than what it is.
-    static func displayable(_ text: String) -> String {
+    public static func displayable(_ text: String) -> String {
         let scalars = text.unicodeScalars.prefix(400).filter { scalar in
             scalar.properties.generalCategory != .control
                 && !(0x202A...0x202E).contains(scalar.value)

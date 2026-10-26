@@ -40,9 +40,13 @@ plain commit hash.
 **Build links.** The one link the app takes from a response is a check's
 link to its CI build, because that is where the `ci` location goes. Anyone
 who can post a status on a repository chooses that link, so it is only
-opened if it is HTTPS, carries no user name or password, and is on the
-repository's own GitHub host or a host you listed in `ciHosts`. Anything
-else opens the checks page on GitHub instead. Hosts must
+opened directly if it is HTTPS, carries no user name or password, and is on
+the repository's own GitHub host or a host you allowed (`ciHosts`). On any
+other host the app asks first, showing the host and the full link. Links
+that aren't HTTPS or carry credentials are never opened or offered.
+
+**Clones.** The checked-out branch is read from the clone's `.git/HEAD`
+without running git, and only a plain branch name or commit hash is used. Hosts must
 be bare hostnames. Descriptions are stripped of control and text-direction
 characters. Responses are size-limited, and no cookies or web cache are
 kept; the only thing saved is the repository list itself (`repos.json`,

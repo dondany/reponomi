@@ -50,6 +50,7 @@ Press **⌃⌥R** (changeable in Settings) to open the search bar.
 | `↩` | Open in the browser |
 | `⇧↩` | Open the local clone, cloning it first if needed |
 | `⌘↩` | Copy the URL instead |
+| `⌥↩` | With `ci` and `ch`: use the default branch, not the one checked out |
 | `⇥` | Pick a location inside the selected repository |
 | `⌘⌫` | Ignore the selected repository (or restore an ignored one) |
 | `⌘⇧.` | Show ignored repositories too |
@@ -79,11 +80,13 @@ pull requests of the best match for `api`. `⇥` shows the full list instead.
 
 Anything else is matched fuzzily against the location names (`sett`, `wiki`).
 
-`api ci↩` goes straight to the CI build of the latest commit on the default
-branch: the first failed check, else the first still running, else the first.
-GitHub Actions builds open as they are; for any other CI, list its host in
-`ciHosts` (below), or you get the checks page instead. `api ch↩` always opens
-the checks page, which lists every status and check run.
+`api ci↩` goes straight to the CI build of the latest commit: the first failed
+check, else the first still running, else the first. `api ch↩` opens the
+checks page, which lists them all. Both use the branch checked out in your
+clone (shown on the row), or the default branch when there's no clone;
+`⌥↩` picks the default branch. GitHub Actions builds open directly; the first
+time a build is on another host, Reponomi asks before opening it and
+remembers the answer (Settings › CI builds).
 
 ### Local clones
 
@@ -118,8 +121,8 @@ Manage….
 ## Configuration
 
 Settings are stored in `~/Library/Application Support/Reponomi/config.json`.
-The Settings window covers everything except custom locations and CI hosts,
-which you add by hand (restart the app afterwards):
+The Settings window covers everything except custom locations, which you add
+by hand (restart the app afterwards):
 
 ```json
 {
@@ -140,9 +143,9 @@ which you add by hand (restart the app afterwards):
 }
 ```
 
-`ciHosts` lists the CI services whose build links `ci` may open.
+`ciHosts` lists the CI services whose build links `ci` opens without asking.
 `{branch}` expands to the repository's default branch, `{sha}` to the latest
-commit on it. Custom locations are
+commit on the checked-out branch. Custom locations are
 matched ahead of the built-in ones, so they can take over a built-in key.
 
 ### Signing in

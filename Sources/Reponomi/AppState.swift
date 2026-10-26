@@ -48,6 +48,14 @@ final class AppState: ObservableObject {
         JSONFile.save(newConfig, to: AppPaths.config)
     }
 
+    /// Lets the CI location open build links on `host` without asking.
+    func allowCIHost(_ host: String) {
+        guard !config.ciHosts.contains(host) else { return }
+        var config = self.config
+        config.ciHosts.append(host)
+        update(config)
+    }
+
     /// Hides a repository (by its `Repo.key`) from the search, or brings it back.
     func setIgnored(_ key: String, _ ignored: Bool) {
         var config = self.config

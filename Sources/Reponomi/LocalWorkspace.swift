@@ -10,8 +10,9 @@ final class LocalWorkspace: ObservableObject {
         case opened, failed
     }
 
-    /// Keys of the repositories that have a clone in their host's working directory.
-    @Published private(set) var cloned: Set<String> = []
+    /// Where the repositories that have a clone in their host's working
+    /// directory are, by `Repo.key`.
+    @Published private(set) var clones: [String: URL] = [:]
     /// Full names of the repositories being cloned right now.
     @Published private(set) var cloning: [String] = []
     /// Why the last attempt to open a repository locally failed.
@@ -28,6 +29,17 @@ final class LocalWorkspace: ObservableObject {
             .store(in: &subscriptions)
     }
 
+    func isCloned(_ repo: Repo) -> Bool {
+        clones[repo.key] != nil
+    }
+
+    /// The branch checked out in `repo`'s clone (or its commit, when
+    /// detached); nil when it isn't cloned. Read afresh each time, since it
+    /// changes whenever someone switches branches.
+    func checkedOutRef(of repo: Repo) -> String? {
+        clones[repo.key].flatMap(Git.checkedOutRef(in:))
+    }
+
     func clearProblem() {
         problem = nil
     }
@@ -40,9 +52,13 @@ final class LocalWorkspace: ObservableObject {
             uniquingKeysWith: { first, _ in first }
         )
         Task {
-            cloned = await Task.detached {
+            clones = await Task.detached {
                 let indexes = roots.mapValues(LocalIndex.init(scanning:))
-                return Set(repos.filter { indexes[$0.host]?.directory(for: $0) != nil }.map(\.key))
+                var found: [String: URL] = [:]
+                for repo in repos {
+                    if let directory = indexes[repo.host]?.directory(for: repo) { found[repo.key] = directory }
+                }
+                return found
             }.value
         }
     }
@@ -62,7 +78,7 @@ final class LocalWorkspace: ObservableObject {
 
         let existing = await Task.detached { LocalIndex(scanning: root).directory(for: repo) }.value
         if let existing {
-            cloned.insert(repo.key)
+            clones[repo.key] = existing
             return await reveal(existing) ? .opened : .failed
         }
 
@@ -86,7 +102,7 @@ final class LocalWorkspace: ObservableObject {
             problem = "Couldn’t clone \(repo.fullName): \(error.localizedDescription)"
             return .failed
         }
-        cloned.insert(repo.key)
+        clones[repo.key] = destination
         return await reveal(destination) ? .opened : .failed
     }
 

@@ -53,17 +53,30 @@ intact.
 ## CI build
 
 `api ci↩` opens the CI build of the latest commit on
-[the branch you're on](#which-branch). When you press Return, Reponomi asks
-GitHub for that commit and for the statuses and check runs reported on it,
-then follows the link of:
+[the branch you're on](#which-branch): the build of the check you named.
+When you press Return, Reponomi asks GitHub for that commit and for the
+statuses and check runs reported on it, and follows the link of the check
+whose name contains one of your **check names**.
 
-1. the first that failed, or
-2. if none failed, the first still running, or
-3. otherwise the first one.
+Set them in **Settings › CI builds** (`ciChecks` in the
+[config file](configuration.md#ci-checks)), separated by commas:
 
-Commit statuses come before check runs. Most CI services outside GitHub
-(Jenkins, TeamCity, CircleCI, Buildkite…) report a status. The build opens
-a moment after the panel closes.
+```
+jenkins, ci/circleci: build
+```
+
+- Case is ignored. A check with exactly your name wins; otherwise a check
+  whose name contains yours: `jenkins` matches
+  `continuous-integration/jenkins/branch`, while `build` picks a check named
+  `build` over `report-build-status`.
+- Earlier names win. Among checks matching the same name, statuses come
+  before check runs.
+- Nothing is guessed: with no check names set, or none that matches this
+  commit's checks, `ci` opens the [checks page](#checks).
+
+The name to use is the one GitHub shows for the check, on the checks page
+or next to the commit's status icon. The build opens a moment after the
+panel closes.
 
 ### Which links it follows
 

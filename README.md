@@ -80,9 +80,10 @@ pull requests of the best match for `api`. `⇥` shows the full list instead.
 
 Anything else is matched fuzzily against the location names (`sett`, `wiki`).
 
-`api ci↩` goes straight to the CI build of the latest commit: the first failed
-check, else the first still running, else the first. `api ch↩` opens the
-checks page, which lists them all. Both use the branch checked out in your
+`api ci↩` goes straight to the CI build of the latest commit: the build of
+the check you named in Settings › CI builds (`jenkins` matches
+`continuous-integration/jenkins/branch`). With no name set, or none that
+matches, it opens the checks page, as `api ch↩` always does. Both use the branch checked out in your
 clone (shown on the row), or the default branch when there's no clone;
 `⌥↩` picks the default branch. GitHub Actions builds open directly; the first
 time a build is on another host, Reponomi asks before opening it and
@@ -139,11 +140,13 @@ by hand (restart the app afterwards):
     { "name": "Deployments", "path": "/deployments", "keys": ["dp"] },
     { "name": "Docs folder", "path": "/tree/{branch}/docs", "keys": ["docs"] }
   ],
+  "ciChecks": ["jenkins"],
   "ciHosts": ["ci.example.com"]
 }
 ```
 
-`ciHosts` lists the CI services whose build links `ci` opens without asking.
+`ciChecks` names the checks `ci` opens, best first; `ciHosts` lists the CI
+services whose build links it opens without asking.
 `{branch}` expands to the repository's default branch, `{sha}` to the latest
 commit on the checked-out branch. Custom locations are
 matched ahead of the built-in ones, so they can take over a built-in key.

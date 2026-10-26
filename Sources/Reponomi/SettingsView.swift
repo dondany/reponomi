@@ -14,6 +14,7 @@ struct SettingsView: View {
     @State private var localApp: String?
     @State private var localCommand = ""
     @State private var ciHosts = ""
+    @State private var ciChecks = ""
     /// Why the form could not be saved, if it couldn't.
     @State private var problem: String?
     @State private var showsIgnored = false
@@ -65,11 +66,12 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    TextField("Check names", text: $ciChecks, prompt: Text("jenkins, ci/circleci: build"))
                     TextField("Build hosts", text: $ciHosts, prompt: Text("ci.example.com, app.circleci.com"))
                 } header: {
                     Text("CI builds")
                 } footer: {
-                    Text("`ci` in the search panel opens the CI build of the latest commit. Builds on GitHub open directly, and so do builds on these hosts. For any other host you’re asked first, and hosts you allow are added here.")
+                    Text("`ci` in the search panel opens the build of the latest commit’s check with one of these names (or whose name contains it; earlier names win), or its checks page if none matches. Builds on GitHub and on these hosts open directly; for any other host you’re asked first, and hosts you allow are added here.")
                         .footnote()
                 }
 
@@ -133,6 +135,7 @@ struct SettingsView: View {
         localApp = config.localApp
         localCommand = config.localCommand ?? ""
         ciHosts = config.ciHosts.joined(separator: ", ")
+        ciChecks = config.ciChecks.joined(separator: ", ")
     }
 
     private func remove(_ id: AccountDraft.ID) {
@@ -176,6 +179,8 @@ struct SettingsView: View {
         let command = localCommand.trimmingCharacters(in: .whitespacesAndNewlines)
         config.localCommand = command.isEmpty ? nil : command
         config.ciHosts = buildHosts
+        config.ciChecks = Config.parseCheckNames(ciChecks)
+        ciChecks = config.ciChecks.joined(separator: ", ")
         ciHosts = buildHosts.joined(separator: ", ")
         state.update(config)
         for index in accounts.indices {

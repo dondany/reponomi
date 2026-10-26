@@ -122,7 +122,7 @@ import Testing
         // Locations without `{sha}` don't need the lookup.
         #expect(await Location.code.resolve(for: repo, using: StubLookup()).opened == "https://github.com/acme/api")
         // The checks page never jumps to a build.
-        let found = [CICheck(name: "ci", state: .failed, link: "https://github.com/acme/api/actions/runs/1")]
+        let found = [CICheck(name: "ci", link: "https://github.com/acme/api/actions/runs/1")]
         #expect(await Location.checks.resolve(for: repo, using: StubLookup(sha: sha, found: found)).opened == "https://github.com/acme/api/commit/\(sha)/checks")
     }
 
@@ -151,30 +151,37 @@ import Testing
         #expect(url?.path == "/acme/api/tree/x?y#z @evil.example")
     }
 
-    @Test func ciOpensTheBuildOfTheCheckWorthLookingAt() async {
+    @Test func ciOpensTheBuildOfTheNamedCheck() async {
         let repo = Repo(id: 1, name: "api", owner: "acme", defaultBranch: "trunk")
         let sha = String(repeating: "ab12", count: 10)
         let page = "https://github.com/acme/api/commit/\(sha)/checks"
-        func open(_ found: [CICheck]?, ciHosts: [String] = ["ci.acme.com"]) async -> String? {
-            await Location.build.resolve(for: repo, using: StubLookup(sha: sha, found: found), ciHosts: ciHosts).opened
+        let jenkins = CICheck(name: "continuous-integration/jenkins/branch", link: "https://ci.acme.com/job/api/42")
+        let actions = CICheck(name: "test", link: "https://github.com/acme/api/actions/runs/7")
+        func open(_ found: [CICheck]?, names: [String] = ["jenkins"], ciHosts: [String] = ["ci.acme.com"]) async -> String? {
+            await Location.build.resolve(for: repo, using: StubLookup(sha: sha, found: found), ciHosts: ciHosts, checkNames: names).opened
         }
-        #expect(await open([CICheck(name: "jenkins", state: .other, link: "https://ci.acme.com/job/api/42")]) == "https://ci.acme.com/job/api/42")
-        #expect(await open([CICheck(name: "test", state: .other, link: "https://github.com/acme/api/actions/runs/7")], ciHosts: []) == "https://github.com/acme/api/actions/runs/7")
+        #expect(await open([actions, jenkins]) == "https://ci.acme.com/job/api/42")
+        #expect(await open([actions, jenkins], names: ["TEST"]) == "https://github.com/acme/api/actions/runs/7")
+        // Earlier names win, whatever the order of the checks.
+        #expect(await open([jenkins, actions], names: ["test", "jenkins"]) == "https://github.com/acme/api/actions/runs/7")
+        #expect(await open([jenkins, actions], names: ["deploy", "jenkins"]) == "https://ci.acme.com/job/api/42")
+        // Nothing is guessed: no names, or no match, gives the checks page.
+        #expect(await open([actions, jenkins], names: []) == page)
+        #expect(await open([actions, jenkins], names: ["circleci"]) == page)
         // A CI host nobody listed is asked about, with the checks page as the alternative.
-        let jenkins = [CICheck(name: "jenkins", state: .other, link: "https://ci.acme.com/job/api/42")]
-        #expect(await Location.build.resolve(for: repo, using: StubLookup(sha: sha, found: jenkins)) == .confirm(
-            host: "ci.acme.com", check: "jenkins", build: URL(string: "https://ci.acme.com/job/api/42")!, otherwise: URL(string: page)!
+        #expect(await Location.build.resolve(for: repo, using: StubLookup(sha: sha, found: [jenkins]), checkNames: ["jenkins"]) == .confirm(
+            host: "ci.acme.com", check: jenkins.name, build: URL(string: "https://ci.acme.com/job/api/42")!, otherwise: URL(string: page)!
         ))
-        #expect(await Location.build.resolve(for: repo, using: StubLookup(sha: sha, found: [CICheck(name: "x", state: .failed, link: "https://EVIL.example/login")])) == .confirm(
+        #expect(await Location.build.resolve(for: repo, using: StubLookup(sha: sha, found: [CICheck(name: "x", link: "https://EVIL.example/login")]), checkNames: ["x"]) == .confirm(
             host: "evil.example", check: "x", build: URL(string: "https://EVIL.example/login")!, otherwise: URL(string: page)!
         ))
         // Links that could never be opened aren't even asked about.
         for link in ["http://ci.acme.com/job", "https://user:pw@ci.acme.com/job", "file:///etc/passwd", "https://ci.acme.com:x/"] {
-            #expect(await open([CICheck(name: "x", state: .failed, link: link)]) == page, "\(link) should give the checks page")
+            #expect(await open([CICheck(name: "jenkins", link: link)]) == page, "\(link) should give the checks page")
         }
         // Nothing to open, or the checks couldn't be read.
         #expect(await open([]) == page)
-        #expect(await open([CICheck(name: "x", state: .failed)]) == page)
+        #expect(await open([CICheck(name: "jenkins")]) == page)
         #expect(await open(nil) == page)
         // Without the commit, the commit's page.
         #expect(await Location.build.resolve(for: repo, using: StubLookup()).opened == "https://github.com/acme/api/commit/trunk")
@@ -191,15 +198,22 @@ import Testing
         #expect(await Location.checks.resolve(for: repo, ref: "local-only", using: lookup).opened == "https://github.com/acme/api/commit/\(onMain)/checks")
     }
 
-    @Test func prefersFailedThenRunningChecks() {
-        let lint = CICheck(name: "lint", state: .other, link: "https://a")
-        let test = CICheck(name: "test", state: .running, link: "https://b")
-        let build = CICheck(name: "build", state: .failed, link: "https://c")
-        let unlinked = CICheck(name: "deploy", state: .failed)
-        #expect(CICheck.preferred([lint, test, unlinked, build]) == build)
-        #expect(CICheck.preferred([lint, unlinked, test]) == test)
-        #expect(CICheck.preferred([lint, CICheck(name: "other", state: .other, link: "https://d")]) == lint)
-        #expect(CICheck.preferred([unlinked]) == nil)
+    @Test func matchesChecksByName() {
+        let branch = CICheck(name: "continuous-integration/jenkins/branch", link: "https://a")
+        let pr = CICheck(name: "continuous-integration/jenkins/pr-merge", link: "https://b")
+        let circle = CICheck(name: "ci/circleci: build", link: "https://c")
+        let unlinked = CICheck(name: "jenkins-unlinked")
+        #expect(CICheck.named(["Jenkins"], in: [circle, branch, pr]) == branch)
+        #expect(CICheck.named(["pr-merge", "jenkins"], in: [branch, pr]) == pr)
+        #expect(CICheck.named(["circleci: build"], in: [branch, circle]) == circle)
+        #expect(CICheck.named(["jenkins-unlinked"], in: [unlinked]) == nil)
+        #expect(CICheck.named(["", "travis"], in: [branch]) == nil)
+        #expect(CICheck.named([], in: [branch]) == nil)
+        // An exact name beats one that only contains it, wherever it is.
+        let report = CICheck(name: "report-build-status", link: "https://d")
+        let build = CICheck(name: "Build", link: "https://e")
+        #expect(CICheck.named(["build"], in: [report, build]) == build)
+        #expect(CICheck.named(["build"], in: [report]) == report)
     }
 
     @Test func opensOnlyHTTPSBuildLinksOnKnownHosts() {
@@ -306,7 +320,7 @@ import Testing
         #expect(config == expected)
         #expect(config.accounts[0].host == "github.com")
         #expect(config.accounts[0].auth == .token)
-        #expect(config.ciHosts == [])
+        #expect(config.ciHosts == [] && config.ciChecks == [])
         #expect(config.hasSources)
         #expect(!Config().hasSources)
     }
@@ -329,6 +343,7 @@ import Testing
         config.localCommand = "lazygit"
         config.customLocations = [Location(name: "Deployments", path: "/deployments", keys: ["d"])]
         config.ciHosts = ["ci.acme.com"]
+        config.ciChecks = ["jenkins"]
         let data = try JSONEncoder().encode(config)
         #expect(try JSONDecoder().decode(Config.self, from: data) == config)
     }
@@ -384,6 +399,11 @@ import Testing
     @Test func parsesOwners() {
         #expect(Config.parseOwners("acme, @someone  other-org,acme,,") == ["acme", "someone", "other-org"])
         #expect(Config.parseOwners("  ") == [])
+    }
+
+    @Test func parsesCheckNameLists() {
+        #expect(Config.parseCheckNames("jenkins, ci/circleci: build\nJenkins,, ") == ["jenkins", "ci/circleci: build"])
+        #expect(Config.parseCheckNames("") == [])
     }
 
     @Test func parsesHostLists() {
@@ -741,12 +761,12 @@ import Testing
         let client = GitHubClient(host: "git.example.com", token: "secret", session: URLSession(configuration: configuration))
 
         #expect(try await client.checks(owner: "platform", name: "billing", commit: sha) == [
-            CICheck(name: "jenkins", state: .failed, link: "https://ci.acme.com/42"),
-            CICheck(name: "lint", state: .running, link: nil),
-            CICheck(name: "docs", state: .other, link: nil),
-            CICheck(name: "test", state: .running, link: "https://git.example.com/platform/billing/actions/runs/1"),
-            CICheck(name: "build", state: .failed, link: "https://git.example.com/platform/billing/runs/2"),
-            CICheck(name: "fmt", state: .other, link: nil),
+            CICheck(name: "jenkins", link: "https://ci.acme.com/42"),
+            CICheck(name: "lint", link: nil),
+            CICheck(name: "docs", link: nil),
+            CICheck(name: "test", link: "https://git.example.com/platform/billing/actions/runs/1"),
+            CICheck(name: "build", link: "https://git.example.com/platform/billing/runs/2"),
+            CICheck(name: "fmt", link: nil),
         ])
 
         // A token that may read only one of the two lists still gets that one.

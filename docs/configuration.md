@@ -89,6 +89,7 @@ is optional.
   "customLocations": [
     { "name": "Deployments", "path": "/deployments", "keys": ["dp"] }
   ],
+  "ciChecks": ["jenkins"],
   "ciHosts": ["ci.example.com"]
 }
 ```
@@ -107,7 +108,7 @@ is optional.
 | `localCommand` | Command to run in the folder, when `localApp` is Terminal or iTerm |
 | `ignored` | Repositories to hide, as `host/owner/name` in lower case |
 | `customLocations` | See below |
-| `ciHosts` | See below |
+| `ciChecks`, `ciHosts` | See below |
 | `hotkey` | Written by the shortcut recorder; change it in Settings |
 
 ### Custom locations
@@ -121,6 +122,17 @@ is optional.
 
 `path` is appended to the repository's URL, with `{branch}` replaced by its
 default branch and `{sha}` by the latest commit on the checked-out branch. See [Locations](locations.md#adding-your-own).
+
+### CI checks
+
+```json
+"ciChecks": ["jenkins", "ci/circleci: build"]
+```
+
+Names of the checks whose build the `ci` location opens, best first. A
+check named exactly that (ignoring case) wins; otherwise one whose name
+contains it. Edit them in
+**Settings › CI builds**. See [Locations](locations.md#ci-build).
 
 ### CI hosts
 

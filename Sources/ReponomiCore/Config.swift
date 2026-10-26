@@ -104,6 +104,9 @@ public struct Config: Codable, Equatable {
     /// Hosts of CI services whose build links the CI location may open, on
     /// top of the repository's own GitHub host.
     public var ciHosts: [String] = []
+    /// Names of the checks the CI location opens, best first; see
+    /// `CICheck.named` for how they match.
+    public var ciChecks: [String] = []
 
     public init() {}
 
@@ -122,6 +125,7 @@ public struct Config: Codable, Equatable {
         localApp = try container.decodeIfPresent(String.self, forKey: .localApp)
         localCommand = try container.decodeIfPresent(String.self, forKey: .localCommand)
         ciHosts = try container.decodeIfPresent([String].self, forKey: .ciHosts) ?? defaults.ciHosts
+        ciChecks = try container.decodeIfPresent([String].self, forKey: .ciChecks) ?? defaults.ciChecks
     }
 
     public var hasSources: Bool { accounts.contains(where: \.hasSources) }
@@ -168,6 +172,16 @@ public struct Config: Codable, Equatable {
             .filter { !$0.isEmpty }
             .map(normalizeHost)
             .filter { seen.insert($0).inserted }
+    }
+
+    /// Check names typed as a list. Only commas and new lines separate them,
+    /// since names such as `ci/circleci: build` have spaces.
+    public static func parseCheckNames(_ text: String) -> [String] {
+        var seen = Set<String>()
+        return text
+            .components(separatedBy: CharacterSet(charactersIn: ",\n"))
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }
     }
 
     /// Whether `host` is a bare hostname. The token is sent to it and URLs

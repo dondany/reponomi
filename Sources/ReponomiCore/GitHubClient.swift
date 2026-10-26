@@ -138,7 +138,6 @@ public struct GitHubClient: CommitLookup {
         struct Payload: Decodable {
             struct Status: Decodable {
                 let context: String?
-                let state: String
                 let targetUrl: String?
             }
             let statuses: [Status]
@@ -146,12 +145,7 @@ public struct GitHubClient: CommitLookup {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         return try decoder.decode(Payload.self, from: data).statuses.map {
-            let state: CICheck.State = switch $0.state {
-            case "failure", "error": .failed
-            case "pending": .running
-            default: .other
-            }
-            return CICheck(name: Self.displayable($0.context ?? ""), state: state, link: $0.targetUrl)
+            CICheck(name: Self.displayable($0.context ?? ""), link: $0.targetUrl)
         }
     }
 
@@ -159,8 +153,6 @@ public struct GitHubClient: CommitLookup {
         struct Payload: Decodable {
             struct Run: Decodable {
                 let name: String
-                let status: String
-                let conclusion: String?
                 let detailsUrl: String?
                 let htmlUrl: String?
             }
@@ -169,15 +161,7 @@ public struct GitHubClient: CommitLookup {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         return try decoder.decode(Payload.self, from: data).checkRuns.map {
-            let state: CICheck.State
-            if $0.status != "completed" {
-                state = .running
-            } else if ["failure", "timed_out", "cancelled", "action_required", "startup_failure"].contains($0.conclusion ?? "") {
-                state = .failed
-            } else {
-                state = .other
-            }
-            return CICheck(name: Self.displayable($0.name), state: state, link: $0.detailsUrl ?? $0.htmlUrl)
+            CICheck(name: Self.displayable($0.name), link: $0.detailsUrl ?? $0.htmlUrl)
         }
     }
 

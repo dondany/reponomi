@@ -60,10 +60,16 @@ public struct Location: Codable, Hashable {
     /// Where to go. A location with `{sha}` asks `lookup` for the latest
     /// commit on `ref` (a branch, usually the one checked out), else on the
     /// default branch, else goes to its fallback. The CI location then goes
-    /// to the build of the check worth looking at: straight there on the
+    /// to the build of the check named in `checkNames`: straight there on the
     /// repository's host or one of `ciHosts`, after asking on any other host,
-    /// and to `path` (the checks page) when there is no such build.
-    public func resolve(for repo: Repo, ref: String? = nil, using lookup: CommitLookup, ciHosts: [String] = []) async -> Destination? {
+    /// and to `path` (the checks page) when no check matches.
+    public func resolve(
+        for repo: Repo,
+        ref: String? = nil,
+        using lookup: CommitLookup,
+        ciHosts: [String] = [],
+        checkNames: [String] = []
+    ) async -> Destination? {
         guard needsHeadCommit else { return url(for: repo).map(Destination.open) }
         var sha: String?
         if let ref {
@@ -75,9 +81,9 @@ public struct Location: Codable, Hashable {
         guard let sha, let page = url(for: repo, headCommit: sha) else {
             return fallbackPath.flatMap { Location(name: name, path: $0).url(for: repo) }.map(Destination.open)
         }
-        guard opensBuild,
+        guard opensBuild, !checkNames.isEmpty,
               let checks = try? await lookup.checks(owner: repo.owner, name: repo.name, commit: sha),
-              let check = CICheck.preferred(checks), let link = check.link,
+              let check = CICheck.named(checkNames, in: checks), let link = check.link,
               let build = CICheck.buildURL(link), let host = build.host?.lowercased()
         else { return .open(page) }
         if let trusted = CICheck.openableURL(link, for: repo, ciHosts: ciHosts) {
@@ -97,8 +103,8 @@ extension Location {
         return location
     }()
 
-    /// The build of the latest commit's most relevant check, from GitHub
-    /// Actions or any other CI; the checks page when there's none to open.
+    /// The build of the check named in `Config.ciChecks`, from GitHub
+    /// Actions or any other CI; the checks page when none matches.
     public static let build: Location = {
         var location = Location(name: "CI build", path: "/commit/{sha}/checks", keys: ["ci", "build", "builds"])
         location.opensBuild = true

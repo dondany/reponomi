@@ -161,12 +161,13 @@ final class SearchPanelController: NSObject, NSWindowDelegate {
             let (repo, location) = target
             let account = state.config.account(for: repo)
             let ciHosts = state.config.ciHosts
+            let checkNames = state.config.ciChecks
             let ref = defaultBranch ? nil : workspace.checkedOutRef(of: repo)
             state.recordUse(of: repo)
             hide()
             Task {
                 let client = await AppState.client(for: repo, account: account)
-                switch await location.resolve(for: repo, ref: ref, using: client, ciHosts: ciHosts) {
+                switch await location.resolve(for: repo, ref: ref, using: client, ciHosts: ciHosts, checkNames: checkNames) {
                 case .open(let url):
                     deliver(url, action)
                 case .confirm(let host, let check, let build, let otherwise):

@@ -2,27 +2,31 @@ import Foundation
 
 /// One CI result reported for a commit: a commit status or a check run.
 public struct CICheck: Equatable, Sendable {
-    public enum State: Equatable, Sendable {
-        case failed, running, other
-    }
-
+    /// The status's context or the check run's name, e.g. `continuous-integration/jenkins/branch`.
     public var name: String
-    public var state: State
     /// Where the CI says its build is, exactly as the server sent it. Never
-    /// opened unless `mayOpen` allows it.
+    /// opened unless `buildURL` allows it.
     public var link: String?
 
-    public init(name: String, state: State, link: String? = nil) {
+    public init(name: String, link: String? = nil) {
         self.name = name
-        self.state = state
         self.link = link
     }
 
-    /// The check worth looking at: the first failed one, else the first still
-    /// running, else the first. Checks without a link don't count.
-    public static func preferred(_ checks: [CICheck]) -> CICheck? {
+    /// The check the person named. For the first of `names` that matches a
+    /// linked check, ignoring case: the check with exactly that name, or else
+    /// the first whose name contains it. An exact match comes first so that
+    /// `build` means the `build` check, not `report-build-status`. Nil when
+    /// nothing matches, so nothing is guessed.
+    public static func named(_ names: [String], in checks: [CICheck]) -> CICheck? {
         let linked = checks.filter { $0.link != nil }
-        return linked.first { $0.state == .failed } ?? linked.first { $0.state == .running } ?? linked.first
+        for name in names where !name.isEmpty {
+            if let check = linked.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame })
+                ?? linked.first(where: { $0.name.localizedCaseInsensitiveContains(name) }) {
+                return check
+            }
+        }
+        return nil
     }
 
     /// `link` as a web address that could be opened at all: HTTPS, a plain

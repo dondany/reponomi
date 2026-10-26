@@ -63,6 +63,10 @@ import Testing
         #expect(best("pj") == "Projects")
         #expect(best("i") == "Issues")
         #expect(best("a") == "Actions")
+        #expect(best("ci") == "CI build")
+        #expect(best("bu") == "CI build")
+        #expect(best("b") == "Branches")
+        #expect(best("ch") == "Checks")
         #expect(best("c") == "Code")
         #expect(best("co") == "Commits")
         #expect(best("NI") == "New issue")
@@ -100,9 +104,39 @@ import Testing
         #expect(Location.code.url(for: repo)?.absoluteString == "https://github.com/acme/api")
         #expect(Location(name: "Pulls", path: "/pulls").url(for: repo)?.absoluteString == "https://github.com/acme/api/pulls")
         #expect(Location(name: "Tree", path: "/tree/{branch}/docs").url(for: repo)?.absoluteString == "https://github.com/acme/api/tree/trunk/docs")
+        let sha = String(repeating: "ab12", count: 10)
         for location in Location.builtIn {
-            #expect(location.url(for: repo) != nil, "\(location.name) has no URL")
+            #expect(location.url(for: repo, headCommit: sha) != nil, "\(location.name) has no URL")
         }
+    }
+
+    @Test func checksOpenTheLatestCommit() async {
+        let repo = Repo(id: 1, name: "api", owner: "acme", defaultBranch: "trunk")
+        let sha = String(repeating: "ab12", count: 10)
+        #expect(Location.checks.needsHeadCommit && !Location.code.needsHeadCommit)
+        #expect(Location.checks.url(for: repo, headCommit: sha)?.absoluteString == "https://github.com/acme/api/commit/\(sha)/checks")
+        #expect(await Location.checks.resolve(for: repo, using: StubLookup(sha: sha))?.absoluteString == "https://github.com/acme/api/commit/\(sha)/checks")
+        // Without the commit, the checks are one click away on the branch's latest commit.
+        #expect(Location.checks.url(for: repo) == nil)
+        #expect(await Location.checks.resolve(for: repo, using: StubLookup())?.absoluteString == "https://github.com/acme/api/commit/trunk")
+        // Locations without `{sha}` don't need the lookup.
+        #expect(await Location.code.resolve(for: repo, using: StubLookup())?.absoluteString == "https://github.com/acme/api")
+        // The checks page never jumps to a build.
+        let found = [CICheck(name: "ci", state: .failed, link: "https://github.com/acme/api/actions/runs/1")]
+        #expect(await Location.checks.resolve(for: repo, using: StubLookup(sha: sha, found: found))?.absoluteString == "https://github.com/acme/api/commit/\(sha)/checks")
+    }
+
+    @Test func onlyACommitHashGoesInPlaceOfSha() async {
+        let repo = Repo(id: 1, name: "api", owner: "acme")
+        let custom = Location(name: "Tree", path: "/tree/{sha}")
+        #expect(custom.url(for: repo, headCommit: String(repeating: "0", count: 64)) != nil)
+        for bad in ["main", "../../evil", String(repeating: "A", count: 40), String(repeating: "a", count: 39) + "?", String(repeating: "a", count: 41)] {
+            #expect(custom.url(for: repo, headCommit: bad) == nil, "\(bad) should be refused")
+        }
+        // Custom locations have no fallback, so a failed lookup opens nothing.
+        #expect(await custom.resolve(for: repo, using: StubLookup()) == nil)
+        let json = Data(#"{"name": "Mine", "path": "/x/{sha}", "fallbackPath": "/y"}"#.utf8)
+        #expect(try! JSONDecoder().decode(Location.self, from: json).fallbackPath == nil)
     }
 
     @Test func onlyEverProducesHTTPSURLsOnTheRepositoryHost() {
@@ -115,6 +149,62 @@ import Testing
         #expect(url?.host == "github.com")
         #expect(url?.query == nil && url?.fragment == nil)
         #expect(url?.path == "/acme/api/tree/x?y#z @evil.example")
+    }
+
+    @Test func ciOpensTheBuildOfTheCheckWorthLookingAt() async {
+        let repo = Repo(id: 1, name: "api", owner: "acme", defaultBranch: "trunk")
+        let sha = String(repeating: "ab12", count: 10)
+        let page = "https://github.com/acme/api/commit/\(sha)/checks"
+        func open(_ found: [CICheck]?, ciHosts: [String] = ["ci.acme.com"]) async -> String? {
+            await Location.build.resolve(for: repo, using: StubLookup(sha: sha, found: found), ciHosts: ciHosts)?.absoluteString
+        }
+        #expect(await open([CICheck(name: "jenkins", state: .other, link: "https://ci.acme.com/job/api/42")]) == "https://ci.acme.com/job/api/42")
+        #expect(await open([CICheck(name: "test", state: .other, link: "https://github.com/acme/api/actions/runs/7")], ciHosts: []) == "https://github.com/acme/api/actions/runs/7")
+        // A CI host nobody listed gets the checks page instead.
+        #expect(await open([CICheck(name: "jenkins", state: .other, link: "https://ci.acme.com/job/api/42")], ciHosts: []) == page)
+        #expect(await open([CICheck(name: "x", state: .failed, link: "https://evil.example/login")]) == page)
+        // Nothing to open, or the checks couldn't be read.
+        #expect(await open([]) == page)
+        #expect(await open([CICheck(name: "x", state: .failed)]) == page)
+        #expect(await open(nil) == page)
+        // Without the commit, the commit's page.
+        #expect(await Location.build.resolve(for: repo, using: StubLookup())?.absoluteString == "https://github.com/acme/api/commit/trunk")
+    }
+
+    @Test func prefersFailedThenRunningChecks() {
+        let lint = CICheck(name: "lint", state: .other, link: "https://a")
+        let test = CICheck(name: "test", state: .running, link: "https://b")
+        let build = CICheck(name: "build", state: .failed, link: "https://c")
+        let unlinked = CICheck(name: "deploy", state: .failed)
+        #expect(CICheck.preferred([lint, test, unlinked, build]) == build)
+        #expect(CICheck.preferred([lint, unlinked, test]) == test)
+        #expect(CICheck.preferred([lint, CICheck(name: "other", state: .other, link: "https://d")]) == lint)
+        #expect(CICheck.preferred([unlinked]) == nil)
+    }
+
+    @Test func opensOnlyHTTPSBuildLinksOnKnownHosts() {
+        let repo = Repo(id: 1, name: "api", owner: "acme", htmlURL: "https://git.example.com/acme/api")
+        func opens(_ link: String) -> Bool { CICheck.openableURL(link, for: repo, ciHosts: ["CI.acme.com"]) != nil }
+        #expect(opens("https://git.example.com/acme/api/actions/runs/1"))
+        #expect(opens("https://ci.acme.com/job/api/42"))
+        #expect(opens("https://CI.ACME.COM/job/api/42?x=1#log"))
+        for link in [
+            "http://ci.acme.com/job/api/42",
+            "https://ci.acme.com.evil.example/job",
+            "https://evil.example/ci.acme.com",
+            "https://user:pass@ci.acme.com/job",
+            "https://ci.acme.com@evil.example/job",
+            "file:///Applications/Calculator.app",
+            "javascript:alert(1)",
+            "x-apple.systempreferences:com.apple.preference.security",
+            "//ci.acme.com/job",
+            "",
+        ] {
+            #expect(!opens(link), "\(link) should be refused")
+        }
+        // A repository that isn't well formed opens nothing at all.
+        let odd = Repo(id: 1, name: "api", owner: "acme", htmlURL: "file:///x")
+        #expect(CICheck.openableURL("https://ci.acme.com/job", for: odd, ciHosts: ["ci.acme.com"]) == nil)
     }
 
     @Test func decodesWithoutKeys() throws {
@@ -196,6 +286,7 @@ import Testing
         #expect(config == expected)
         #expect(config.accounts[0].host == "github.com")
         #expect(config.accounts[0].auth == .token)
+        #expect(config.ciHosts == [])
         #expect(config.hasSources)
         #expect(!Config().hasSources)
     }
@@ -217,6 +308,7 @@ import Testing
         config.localApp = "/Applications/Visual Studio Code.app"
         config.localCommand = "lazygit"
         config.customLocations = [Location(name: "Deployments", path: "/deployments", keys: ["d"])]
+        config.ciHosts = ["ci.acme.com"]
         let data = try JSONEncoder().encode(config)
         #expect(try JSONDecoder().decode(Config.self, from: data) == config)
     }
@@ -514,7 +606,8 @@ import Testing
     }
 }
 
-@Suite struct GitHubClientTests {
+// Serialized because the tests that stub responses share `StubProtocol`.
+@Suite(.serialized) struct GitHubClientTests {
     @Test func findsNextPageLink() {
         let header = #"<https://api.github.com/orgs/acme/repos?page=1>; rel="prev", <https://api.github.com/orgs/acme/repos?page=3>; rel="next", <https://api.github.com/orgs/acme/repos?page=9>; rel="last""#
         #expect(GitHubClient.nextLink(header)?.absoluteString == "https://api.github.com/orgs/acme/repos?page=3")
@@ -536,6 +629,7 @@ import Testing
             first: (200, ["Link": "<\(second)>; rel=\"next\""], page1),
             second: (200, [:], page2),
         ]
+        StubProtocol.authorizations = []
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [StubProtocol.self]
         let client = GitHubClient(host: "git.example.com", token: "secret", session: URLSession(configuration: configuration))
@@ -549,6 +643,58 @@ import Testing
         await #expect(throws: GitHubError.unknownOwner("nobody")) {
             try await client.repos(owner: "nobody")
         }
+    }
+
+    @Test func looksUpTheLatestCommit() async throws {
+        let sha = String(repeating: "ab12", count: 10)
+        let api = "https://git.example.com/api/v3/repos"
+        StubProtocol.responses = [
+            "\(api)/platform/billing/commits/HEAD": (200, [:], sha + "\n"),
+            "\(api)/platform/hostile/commits/HEAD": (200, [:], "https://evil.example/"),
+            "\(api)/platform/huge/commits/HEAD": (200, [:], String(repeating: "a", count: 5_000)),
+        ]
+        StubProtocol.authorizations = []
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [StubProtocol.self]
+        let client = GitHubClient(host: "git.example.com", token: "secret", session: URLSession(configuration: configuration))
+
+        #expect(try await client.headCommit(owner: "platform", name: "billing") == sha)
+        #expect(StubProtocol.authorizations == ["Bearer secret"])
+        await #expect(throws: GitHubError.badResponse) { try await client.headCommit(owner: "platform", name: "hostile") }
+        await #expect(throws: GitHubError.badResponse) { try await client.headCommit(owner: "platform", name: "huge") }
+        await #expect(throws: GitHubError.notFound) { try await client.headCommit(owner: "platform", name: "missing") }
+        await #expect(throws: GitHubError.notFound) { try await client.headCommit(owner: "platform", name: "../../user") }
+    }
+
+    @Test func readsStatusesAndCheckRuns() async throws {
+        let sha = String(repeating: "ab12", count: 10)
+        let base = "https://git.example.com/api/v3/repos/platform/billing/commits/\(sha)"
+        let statuses = #"{"state": "failure", "statuses": [{"context": "jenkins", "state": "failure", "target_url": "https://ci.acme.com/42"}, {"context": "lint", "state": "pending", "target_url": null}, {"context": "docs", "state": "success"}]}"#
+        let runs = #"{"total_count": 3, "check_runs": [{"name": "test", "status": "in_progress", "conclusion": null, "details_url": "https://git.example.com/platform/billing/actions/runs/1"}, {"name": "build", "status": "completed", "conclusion": "timed_out", "details_url": null, "html_url": "https://git.example.com/platform/billing/runs/2"}, {"name": "fmt", "status": "completed", "conclusion": "skipped"}]}"#
+        StubProtocol.responses = [
+            "\(base)/status?per_page=100": (200, [:], statuses),
+            "\(base)/check-runs?per_page=100": (200, [:], runs),
+        ]
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [StubProtocol.self]
+        let client = GitHubClient(host: "git.example.com", token: "secret", session: URLSession(configuration: configuration))
+
+        #expect(try await client.checks(owner: "platform", name: "billing", commit: sha) == [
+            CICheck(name: "jenkins", state: .failed, link: "https://ci.acme.com/42"),
+            CICheck(name: "lint", state: .running, link: nil),
+            CICheck(name: "docs", state: .other, link: nil),
+            CICheck(name: "test", state: .running, link: "https://git.example.com/platform/billing/actions/runs/1"),
+            CICheck(name: "build", state: .failed, link: "https://git.example.com/platform/billing/runs/2"),
+            CICheck(name: "fmt", state: .other, link: nil),
+        ])
+
+        // A token that may read only one of the two lists still gets that one.
+        StubProtocol.responses = ["\(base)/check-runs?per_page=100": (200, [:], runs)]
+        #expect(try await client.checks(owner: "platform", name: "billing", commit: sha).map(\.name) == ["test", "build", "fmt"])
+        StubProtocol.responses = [:]
+        await #expect(throws: GitHubError.notFound) { try await client.checks(owner: "platform", name: "billing", commit: sha) }
+        // Only a commit hash goes into the request's path.
+        await #expect(throws: GitHubError.notFound) { try await client.checks(owner: "platform", name: "billing", commit: "../../x") }
     }
 
     /// A hostile or compromised server controls every field of its responses.
@@ -578,6 +724,9 @@ import Testing
             #expect(!Config.isValidHost(host), "\(host) should be refused")
             await #expect(throws: GitHubError.invalidHost(host)) {
                 try await GitHubClient(host: host, token: "secret").repos(owner: "acme")
+            }
+            await #expect(throws: GitHubError.invalidHost(host)) {
+                try await GitHubClient(host: host, token: "secret").headCommit(owner: "acme", name: "api")
             }
         }
         for host in ["github.com", "git.example.com", "acme.ghe.com", "ghe-01.corp.example"] {
@@ -637,6 +786,22 @@ import Testing
         #expect(repo.isPrivate && repo.isArchived && !repo.isFork)
         #expect(repo.defaultBranch == "main")
         #expect(repo.pushedAt == ISO8601DateFormatter().date(from: "2026-09-30T12:00:00Z"))
+    }
+}
+
+/// Answers the commit lookups of the CI and Checks locations; nil throws.
+struct StubLookup: CommitLookup {
+    var sha: String?
+    var found: [CICheck]?
+
+    func headCommit(owner: String, name: String) async throws -> String {
+        guard let sha else { throw GitHubError.notFound }
+        return sha
+    }
+
+    func checks(owner: String, name: String, commit: String) async throws -> [CICheck] {
+        guard let found else { throw GitHubError.notFound }
+        return found
     }
 }
 

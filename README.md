@@ -67,17 +67,23 @@ pull requests of the best match for `api`. `⇥` shows the full list instead.
 | Key | Location | Key | Location |
 | --- | --- | --- | --- |
 | `c` | Code | `l` | Local folder |
-| `w` | Wiki | | |
+| `w` | Wiki | `ch` | Checks |
 | `p`, `pr` | Pull requests | `d` | Discussions |
 | `i` | Issues | `pj` | Projects |
-| `a`, `ci` | Actions | `se` | Security |
+| `a` | Actions | `se` | Security |
 | `r` | Releases | `in` | Insights |
 | `b` | Branches | `mp` | My pull requests |
 | `co` | Commits | `np` | New pull request |
 | `t` | Tags | `ni` | New issue |
-| `s` | Settings | | |
+| `s` | Settings | `ci`, `bu` | CI build |
 
 Anything else is matched fuzzily against the location names (`sett`, `wiki`).
+
+`api ci↩` goes straight to the CI build of the latest commit on the default
+branch: the first failed check, else the first still running, else the first.
+GitHub Actions builds open as they are; for any other CI, list its host in
+`ciHosts` (below), or you get the checks page instead. `api ch↩` always opens
+the checks page, which lists every status and check run.
 
 ### Local clones
 
@@ -112,8 +118,8 @@ Manage….
 ## Configuration
 
 Settings are stored in `~/Library/Application Support/Reponomi/config.json`.
-The Settings window covers everything except custom locations, which you add
-by hand (restart the app afterwards):
+The Settings window covers everything except custom locations and CI hosts,
+which you add by hand (restart the app afterwards):
 
 ```json
 {
@@ -129,11 +135,14 @@ by hand (restart the app afterwards):
   "customLocations": [
     { "name": "Deployments", "path": "/deployments", "keys": ["dp"] },
     { "name": "Docs folder", "path": "/tree/{branch}/docs", "keys": ["docs"] }
-  ]
+  ],
+  "ciHosts": ["ci.example.com"]
 }
 ```
 
-`{branch}` expands to the repository's default branch. Custom locations are
+`ciHosts` lists the CI services whose build links `ci` may open.
+`{branch}` expands to the repository's default branch, `{sha}` to the latest
+commit on it. Custom locations are
 matched ahead of the built-in ones, so they can take over a built-in key.
 
 ### Signing in

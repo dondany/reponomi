@@ -32,7 +32,10 @@ keychain prompt after rebuilding the app.
 
 Paste a personal access token. It is stored in your login keychain.
 
-- **Fine-grained token:** read-only access to **Metadata** is enough.
+- **Fine-grained token:** read-only access to **Metadata** is enough. Add
+  read-only **Contents**, **Commit statuses** and **Checks** so the
+  [CI build](locations.md#ci-build) and [Checks](locations.md#checks)
+  locations can go beyond the commit's page.
 - **Classic token:** the `repo` scope, for private repositories.
 - Leave the field empty to list public repositories on github.com
   anonymously. GitHub limits anonymous use to 60 requests an hour.

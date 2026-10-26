@@ -36,7 +36,7 @@ public enum GitHubError: LocalizedError, Equatable {
     }
 }
 
-public struct GitHubClient {
+public struct GitHubClient: CommitLookup {
     public let host: String
     public let token: String?
     private let session: URLSession
@@ -94,37 +94,138 @@ public struct GitHubClient {
         return try await fetchAll("\(apiBase)/user/repos?per_page=100&affiliation=owner,collaborator,organization_member")
     }
 
-    private func fetchAll(_ start: String) async throws -> [Repo] {
-        // The token goes to this host, so it has to be a host and nothing more.
-        guard Config.isValidHost(host) else { throw GitHubError.invalidHost(host) }
-        if let token, !token.unicodeScalars.allSatisfy({ $0.isASCII && $0.value > 0x20 && $0.value < 0x7F }) {
-            throw GitHubError.malformedToken
+    /// The latest commit on the repository's default branch, as a hash.
+    public func headCommit(owner: String, name: String) async throws -> String {
+        // Both become part of the request's path.
+        guard Repo.isSafeName(owner), Repo.isSafeName(name) else { throw GitHubError.notFound }
+        try checkHostAndToken()
+        guard let url = URL(string: "\(apiBase)/repos/\(owner)/\(name)/commits/HEAD") else { throw GitHubError.badResponse }
+        // This media type answers with the bare hash instead of the whole commit.
+        let (data, _) = try await get(url, accept: "application/vnd.github.sha", maxBytes: 1_000)
+        let sha = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard Self.isCommitHash(sha) else { throw GitHubError.badResponse }
+        return sha
+    }
+
+    /// The commit statuses, then the check runs, reported for `commit`. One
+    /// of the two lists is enough; a token may only be allowed to read one.
+    public func checks(owner: String, name: String, commit: String) async throws -> [CICheck] {
+        guard Repo.isSafeName(owner), Repo.isSafeName(name), Self.isCommitHash(commit) else { throw GitHubError.notFound }
+        try checkHostAndToken()
+        let base = "\(apiBase)/repos/\(owner)/\(name)/commits/\(commit)"
+        guard let statusURL = URL(string: "\(base)/status?per_page=100"),
+              let runsURL = URL(string: "\(base)/check-runs?per_page=100")
+        else { throw GitHubError.badResponse }
+        async let statuses = attempt { try decodeStatuses(try await get(statusURL, accept: "application/vnd.github+json", maxBytes: Self.maxPageBytes).0) }
+        async let runs = attempt { try decodeCheckRuns(try await get(runsURL, accept: "application/vnd.github+json", maxBytes: Self.maxPageBytes).0) }
+        let (fromStatuses, fromRuns) = await (statuses, runs)
+        if case .failure(let error) = fromStatuses, case .failure = fromRuns { throw error }
+        return ((try? fromStatuses.get()) ?? []) + ((try? fromRuns.get()) ?? [])
+    }
+
+    private func attempt(_ body: () async throws -> [CICheck]) async -> Result<[CICheck], Error> {
+        do {
+            return .success(try await body())
+        } catch {
+            return .failure(error)
         }
+    }
+
+    func decodeStatuses(_ data: Data) throws -> [CICheck] {
+        struct Payload: Decodable {
+            struct Status: Decodable {
+                let context: String?
+                let state: String
+                let targetUrl: String?
+            }
+            let statuses: [Status]
+        }
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        return try decoder.decode(Payload.self, from: data).statuses.map {
+            let state: CICheck.State = switch $0.state {
+            case "failure", "error": .failed
+            case "pending": .running
+            default: .other
+            }
+            return CICheck(name: Self.displayable($0.context ?? ""), state: state, link: $0.targetUrl)
+        }
+    }
+
+    func decodeCheckRuns(_ data: Data) throws -> [CICheck] {
+        struct Payload: Decodable {
+            struct Run: Decodable {
+                let name: String
+                let status: String
+                let conclusion: String?
+                let detailsUrl: String?
+                let htmlUrl: String?
+            }
+            let checkRuns: [Run]
+        }
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        return try decoder.decode(Payload.self, from: data).checkRuns.map {
+            let state: CICheck.State
+            if $0.status != "completed" {
+                state = .running
+            } else if ["failure", "timed_out", "cancelled", "action_required", "startup_failure"].contains($0.conclusion ?? "") {
+                state = .failed
+            } else {
+                state = .other
+            }
+            return CICheck(name: Self.displayable($0.name), state: state, link: $0.detailsUrl ?? $0.htmlUrl)
+        }
+    }
+
+    /// A full SHA-1 or SHA-256 commit hash, which is all that may go into a URL.
+    public static func isCommitHash(_ text: String) -> Bool {
+        (text.count == 40 || text.count == 64) && text.unicodeScalars.allSatisfy { "0123456789abcdef".unicodeScalars.contains($0) }
+    }
+
+    private func fetchAll(_ start: String) async throws -> [Repo] {
+        try checkHostAndToken()
         var repos: [Repo] = []
         var next = URL(string: start)
         var pages = 0
         while let url = next, pages < Self.maxPages {
-            var request = URLRequest(url: url)
-            // An internal host that is unreachable off the VPN should fail fast.
-            request.timeoutInterval = 20
-            request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-            if let token {
-                request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-            }
-            let (bytes, response) = try await session.bytes(for: request)
-            guard let http = response as? HTTPURLResponse else { throw GitHubError.badResponse }
-            var data = Data()
-            for try await byte in bytes {
-                data.append(byte)
-                // Don't let a server fill memory with an endless response.
-                guard data.count <= Self.maxPageBytes else { throw GitHubError.badResponse }
-            }
-            guard http.statusCode == 200 else { throw Self.error(for: http, body: data) }
+            let (data, http) = try await get(url, accept: "application/vnd.github+json", maxBytes: Self.maxPageBytes)
             repos += try decodeRepos(data)
             next = http.value(forHTTPHeaderField: "Link").flatMap(nextPage)
             pages += 1
         }
         return repos
+    }
+
+    /// Refuses before anything is sent, since the token goes to this host:
+    /// it has to be a host and nothing more, and the token a plain token.
+    private func checkHostAndToken() throws {
+        guard Config.isValidHost(host) else { throw GitHubError.invalidHost(host) }
+        if let token, !token.unicodeScalars.allSatisfy({ $0.isASCII && $0.value > 0x20 && $0.value < 0x7F }) {
+            throw GitHubError.malformedToken
+        }
+    }
+
+    /// One successful (200) response from this host's API.
+    private func get(_ url: URL, accept: String, maxBytes: Int) async throws -> (Data, HTTPURLResponse) {
+        try checkHostAndToken()
+        var request = URLRequest(url: url)
+        // An internal host that is unreachable off the VPN should fail fast.
+        request.timeoutInterval = 20
+        request.setValue(accept, forHTTPHeaderField: "Accept")
+        if let token {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        let (bytes, response) = try await session.bytes(for: request)
+        guard let http = response as? HTTPURLResponse else { throw GitHubError.badResponse }
+        var data = Data()
+        for try await byte in bytes {
+            data.append(byte)
+            // Don't let a server fill memory with an endless response.
+            guard data.count <= maxBytes else { throw GitHubError.badResponse }
+        }
+        guard http.statusCode == 200 else { throw Self.error(for: http, body: data) }
+        return (data, http)
     }
 
     private static func error(for response: HTTPURLResponse, body: Data) -> GitHubError {

@@ -101,6 +101,9 @@ public struct Config: Codable, Equatable {
     /// A command to run in the folder, e.g. `lazygit`, when `localApp` is a
     /// terminal that `TerminalApp` knows how to drive.
     public var localCommand: String?
+    /// Hosts of CI services whose build links the CI location may open, on
+    /// top of the repository's own GitHub host.
+    public var ciHosts: [String] = []
 
     public init() {}
 
@@ -118,6 +121,7 @@ public struct Config: Codable, Equatable {
         ignored = try container.decodeIfPresent([String].self, forKey: .ignored) ?? defaults.ignored
         localApp = try container.decodeIfPresent(String.self, forKey: .localApp)
         localCommand = try container.decodeIfPresent(String.self, forKey: .localCommand)
+        ciHosts = try container.decodeIfPresent([String].self, forKey: .ciHosts) ?? defaults.ciHosts
     }
 
     public var hasSources: Bool { accounts.contains(where: \.hasSources) }

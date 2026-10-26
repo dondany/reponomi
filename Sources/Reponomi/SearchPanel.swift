@@ -153,18 +153,38 @@ final class SearchPanelController: NSObject, NSWindowDelegate {
             openLocally(target.repo)
             return
         }
+        if target.location.needsHeadCommit {
+            // The page depends on the latest commit, so ask GitHub for it
+            // first. The panel goes away now; the page opens when it's known.
+            let (repo, location) = target
+            let account = state.config.account(for: repo)
+            let ciHosts = state.config.ciHosts
+            state.recordUse(of: repo)
+            hide()
+            Task {
+                let client = await AppState.client(for: repo, account: account)
+                let url = await location.resolve(for: repo, using: client, ciHosts: ciHosts)
+                guard let url else { return NSSound.beep() }
+                deliver(url, action)
+            }
+            return
+        }
         guard let url = target.location.url(for: target.repo) else {
             NSSound.beep()
             return
         }
         state.recordUse(of: target.repo)
+        deliver(url, action)
+        hide()
+    }
+
+    private func deliver(_ url: URL, _ action: Action) {
         if action == .copyURL {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(url.absoluteString, forType: .string)
         } else {
             NSWorkspace.shared.open(url)
         }
-        hide()
     }
 
     /// Opens the repository's clone. While it is being cloned the panel

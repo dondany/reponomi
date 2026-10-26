@@ -48,7 +48,7 @@ New here? Start with [Getting started](getting-started.md).
 
 1. [Getting started](getting-started.md) — install, first launch, first search
 2. [Searching](searching.md) — the panel, the keys, how results are ranked
-3. [Locations](locations.md) — jumping to pull requests, issues, Actions and more
+3. [Locations](locations.md) — jumping to pull requests, issues, CI checks and more
 4. [Accounts](accounts.md) — signing in, organizations, GitHub Enterprise
 5. [Local clones](local-clones.md) — working directories, cloning, editors and terminals
 6. [Ignoring repositories](ignoring.md) — hiding and restoring

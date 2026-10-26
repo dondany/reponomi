@@ -13,7 +13,8 @@ for.
 ## What leaves your Mac
 
 Only requests to the API of the GitHub hosts you configured, over HTTPS, to
-list repositories. There is no Reponomi account, no telemetry, no update
+list repositories and, when you open a repository's CI build or checks, to
+look up its latest commit and the statuses and check runs reported on it. There is no Reponomi account, no telemetry, no update
 check and nothing listening on the network.
 
 ## Credentials
@@ -25,13 +26,23 @@ check and nothing listening on the network.
 - A redirect or "next page" link pointing at a different host does not
   receive the token.
 - The app only reads. A fine-grained token with read-only Metadata access is
-  all it needs.
+  all it needs; adding read-only Contents, Commit statuses and Checks access
+  lets the CI build and Checks locations go further than the commit's page.
 
 ## What the app refuses to trust
 
 **The server.** A repository's address is always built as
 `https://<host>/<owner>/<name>` from the account's host, never taken from a
-response. Names with characters GitHub doesn't allow are dropped. Hosts must
+response. Names with characters GitHub doesn't allow are dropped. A commit looked up
+for the CI build and Checks locations is only put into a link if it is a
+plain commit hash.
+
+**Build links.** The one link the app takes from a response is a check's
+link to its CI build, because that is where the `ci` location goes. Anyone
+who can post a status on a repository chooses that link, so it is only
+opened if it is HTTPS, carries no user name or password, and is on the
+repository's own GitHub host or a host you listed in `ciHosts`. Anything
+else opens the checks page on GitHub instead. Hosts must
 be bare hostnames. Descriptions are stripped of control and text-direction
 characters. Responses are size-limited, and no cookies or web cache are
 kept; the only thing saved is the repository list itself (`repos.json`,

@@ -120,6 +120,14 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// A client for `repo`'s host, signed in as the account it was listed
+    /// from, or anonymous if there's no token. Off the main actor because
+    /// `gh` may be started.
+    nonisolated static func client(for repo: Repo, account: Account?) async -> GitHubClient {
+        let token = try? account.flatMap(Credentials.token(for:))
+        return GitHubClient(host: repo.host, token: token ?? nil)
+    }
+
     /// Everything one account lists, plus a message per source that failed.
     private nonisolated static func load(_ account: Account) async -> (repos: [Repo], failures: [String]) {
         guard Config.isValidHost(account.host) else {
